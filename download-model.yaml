@@ -1,0 +1,67 @@
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: hf-download-job
+  namespace: sunshinecoder
+spec:
+  ttlSecondsAfterFinished: 3600
+  backoffLimit: 2
+  template:
+    spec:
+      restartPolicy: Never
+      containers:
+        - name: downloader
+          image: python:3.11
+          env:
+            - name: MODEL_ID
+              value: "Qwen/Qwen3.5-397B-A17B-FP8"  # ← change per run
+            - name: HF_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: hf-credentials
+                  key: token
+            - name: HF_HOME
+              value: "/tmp/huggingface"
+            - name: HF_XET_CACHE
+              value: "/tmp/huggingface/xet"
+            - name: PIP_TARGET
+              value: "/tmp/pypackages"
+            - name: PYTHONPATH
+              value: "/tmp/pypackages"
+          command: ["/bin/bash", "-c"]
+          args:
+            - |
+              pip install huggingface_hub &&
+              python3 -c "
+              import os
+              from huggingface_hub import snapshot_download
+              model_id = os.environ['MODEL_ID']
+              token = os.environ['HF_TOKEN']
+              local_dir = '/mnt/models/' + model_id.split('/')[-1]
+              print(f'Downloading {model_id} to {local_dir}')
+              snapshot_download(
+                repo_id=model_id,
+                local_dir=local_dir,
+                token=token
+              )
+              print('Download complete!')
+              "
+          volumeMounts:
+            - mountPath: /mnt/models
+              name: model-storage
+            - mountPath: /tmp
+              name: tmp-volume
+          resources:
+            limits:
+              memory: "64Gi"
+              cpu: "32"
+            requests:
+              memory: "32Gi"
+              cpu: "16"
+      volumes:
+        - name: model-storage
+          persistentVolumeClaim:
+            claimName: llm-model-weights  # ← change per run
+        - name: tmp-volume
+          emptyDir:
+            sizeLimit: 50Gi
