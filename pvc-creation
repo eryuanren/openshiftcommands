@@ -1,0 +1,13 @@
+kind: PersistentVolumeClaim
+apiVersion: v1
+metadata:
+  name: <insert-name>  # e.g. llm-model-weights-qwen3-397b
+  namespace: sunshinecoder
+spec:
+  accessModes:
+    - ReadWriteOnce
+  storageClassName: lvms-vg1
+  volumeMode: Filesystem
+  resources:
+    requests:
+      storage: 500Gi  # adjust per model size
