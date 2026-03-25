@@ -1,0 +1,174 @@
+kind: Deployment
+apiVersion: apps/v1
+metadata:
+  name: vllm
+  namespace: sunshinecoder
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: vllm
+  strategy:
+    type: Recreate
+  revisionHistoryLimit: 10
+  progressDeadlineSeconds: 1800
+  template:
+    metadata:
+      labels:
+        app: vllm
+    spec:
+      restartPolicy: Always
+      terminationGracePeriodSeconds: 180
+      dnsPolicy: ClusterFirst
+      enableServiceLinks: false
+      securityContext: {}
+      schedulerName: default-scheduler
+
+      volumes:
+        - name: model-storage
+          persistentVolumeClaim:
+            claimName: llm-model-weights
+        - name: cache-volume
+          emptyDir:
+            sizeLimit: 20Gi
+        - name: config-volume
+          emptyDir:
+            sizeLimit: 1Gi
+        - name: triton-volume
+          emptyDir:
+            sizeLimit: 20Gi
+        - name: tensorrt-volume
+          emptyDir:
+            sizeLimit: 20Gi
+        - name: home-volume
+          emptyDir:
+            sizeLimit: 10Gi
+        - name: tmp-volume
+          emptyDir:
+            sizeLimit: 20Gi
+        - name: shm-volume
+          emptyDir:
+            medium: Memory
+            sizeLimit: 200Gi
+
+      containers:
+        - name: vllm
+          image: vllm/vllm-openai:v0.17.1-cu130
+          imagePullPolicy: IfNotPresent
+
+          command:
+            - python3
+            - -m
+            - vllm.entrypoints.openai.api_server
+
+          args:
+            - --model=/mnt/models/Qwen3.5-397B-A17B-FP8
+            - --served-model-name=qwen3.5-397b-fp8
+            - --host=0.0.0.0
+            - --port=11435
+            - --tensor-parallel-size=8
+            - --download-dir=/mnt/models
+            - --disable-custom-all-reduce
+            - --gpu-memory-utilization=0.75
+            - --max-num-seqs=512
+            - --max-num-batched-tokens=65536
+            - --enable-chunked-prefill
+            - --max-num-chunked-prefill-tokens=4096
+            - --enable-prefix-caching
+            - --enable-auto-tool-choice
+            - --tool-call-parser=qwen3_xml
+            - --reasoning-parser=qwen3
+
+          ports:
+            - containerPort: 11435
+              protocol: TCP
+
+          resources:
+            requests:
+              cpu: "32"
+              memory: 420Gi
+              nvidia.com/gpu: "8"
+            limits:
+              cpu: "64"
+              memory: 450Gi
+              nvidia.com/gpu: "8"
+
+          securityContext:
+            runAsNonRoot: true
+            runAsGroup: 0
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop:
+                - ALL
+            seccompProfile:
+              type: RuntimeDefault
+
+          lifecycle:
+            preStop:
+              exec:
+                command:
+                  - /bin/sh
+                  - -c
+                  - sleep 15
+
+          env:
+            - name: HF_HOME
+              value: /mnt/models/.cache
+            - name: VLLM_CACHE_ROOT
+              value: /mnt/models/.cache
+            - name: TRITON_CACHE_DIR
+              value: /mnt/models/.cache/triton
+            - name: VLLM_CONFIG_ROOT
+              value: /mnt/models/.config
+            - name: TENSORRT_LLM_TMPDIR
+              value: /mnt/models/.cache/tensorrt_llm
+            - name: TORCH_CUDA_ARCH_LIST
+              value: "9.0"
+            - name: PYTORCH_CUDA_ALLOC_CONF
+              value: "expandable_segments:True,max_split_size_mb:512"
+            - name: CUDA_DEVICE_MAX_CONNECTIONS
+              value: "1"
+            - name: VLLM_LOGGING_LEVEL
+              value: INFO
+            - name: VLLM_ALLOW_LONG_MAX_MODEL_LEN
+              value: "1"
+            - name: VLLM_FLASH_ATTN_VERSION
+              value: "3"
+            - name: VLLM_USE_TRITON_FLASH_ATTN
+              value: "0"
+            - name: VLLM_WORKER_MULTIPROC_METHOD
+              value: spawn
+            - name: DISABLE_CUSTOM_ALL_REDUCE
+              value: "1"
+            - name: NCCL_SHM_DISABLE
+              value: "0"
+            - name: NCCL_P2P_DISABLE
+              value: "0"
+            - name: NCCL_IB_DISABLE
+              value: "0"
+            - name: NCCL_NET_GDR_LEVEL
+              value: SYS
+            - name: NCCL_ALGO
+              value: "Tree,Ring"
+            - name: NCCL_SOCKET_IFNAME
+              value: eth0
+            - name: NCCL_TOPO_DUMP_FILE
+              value: /tmp/nccl_topo.xml
+
+          volumeMounts:
+            - name: model-storage
+              mountPath: /mnt/models
+            - name: cache-volume
+              mountPath: /.cache
+            - name: config-volume
+              mountPath: /.config
+            - name: triton-volume
+              mountPath: /.triton
+            - name: tensorrt-volume
+              mountPath: /.tensorrt_llm
+            - name: home-volume
+              mountPath: /root
+            - name: tmp-volume
+              mountPath: /tmp
+            - name: shm-volume
+              mountPath: /dev/shm
