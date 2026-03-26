@@ -69,7 +69,7 @@ spec:
             - --tensor-parallel-size=8
             - --download-dir=/mnt/models
             - --disable-custom-all-reduce
-            - --gpu-memory-utilization=0.75
+            - --gpu-memory-utilization=0.70
             - --max-num-seqs=512
             - --max-num-batched-tokens=65536
             - --enable-chunked-prefill
@@ -87,11 +87,11 @@ spec:
             requests:
               cpu: "32"
               memory: 420Gi
-              nvidia.com/gpu: "8"
+              nvidia.com/gpu.shared: "8"
             limits:
               cpu: "64"
               memory: 450Gi
-              nvidia.com/gpu: "8"
+              nvidia.com/gpu.shared: "8"
 
           securityContext:
             runAsNonRoot: true
