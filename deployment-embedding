@@ -1,0 +1,133 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: qwen-embedding
+  namespace: sunshinecoder
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: qwen-embedding
+  strategy:
+    type: Recreate
+  template:
+    metadata:
+      labels:
+        app: qwen-embedding
+    spec:
+      restartPolicy: Always
+      terminationGracePeriodSeconds: 60
+      enableServiceLinks: false
+      dnsPolicy: ClusterFirst
+      securityContext: {}
+      volumes:
+        - name: model-storage
+          persistentVolumeClaim:
+            claimName: llm-model-weights-qwen3-vl-embedding-8b
+        - name: shm-volume
+          emptyDir:
+            medium: Memory
+            sizeLimit: 32Gi
+        - name: cache-volume
+          emptyDir:
+            sizeLimit: 10Gi
+        - name: config-volume
+          emptyDir:
+            sizeLimit: 1Gi
+        - name: tmp-volume
+          emptyDir:
+            sizeLimit: 10Gi
+        - name: home-volume
+          emptyDir:
+            sizeLimit: 5Gi
+      containers:
+        - name: qwen-embedding
+          image: vllm/vllm-openai:v0.18.0-cu130
+          imagePullPolicy: IfNotPresent
+          command:
+            - python3
+            - -m
+            - vllm.entrypoints.openai.api_server
+          args:
+            - --model=/mnt/models
+            - --served-model-name=qwen3-vl-embedding
+            - --host=0.0.0.0
+            - --port=11437
+            - --runner=pooling
+            - --gpu-memory-utilization=0.15
+            - --max-num-seqs=8
+            - --max-model-len=32768
+            - --limit_mm_per_prompt={"image":3,"video":0}
+            - --enforce-eager
+            - --tensor-parallel-size=1
+            - --download-dir=/mnt/models
+            - --trust-remote-code
+          env:
+            - name: HUGGING_FACE_HUB_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: hf-token
+                  key: HUGGING_FACE_HUB_TOKEN
+            - name: CUDA_VISIBLE_DEVICES
+              value: "0"
+            - name: TORCH_CUDA_ARCH_LIST
+              value: "9.0"
+            - name: PYTORCH_CUDA_ALLOC_CONF
+              value: "expandable_segments:True"
+            - name: VLLM_LOGGING_LEVEL
+              value: "INFO"
+            - name: HF_HOME
+              value: /mnt/models/.cache
+          ports:
+            - containerPort: 11437
+              protocol: TCP
+          resources:
+            limits:
+              nvidia.com/gpu.shared: '1'
+              cpu: '8'
+              memory: 32Gi
+            requests:
+              nvidia.com/gpu.shared: '1'
+              cpu: '4'
+              memory: 16Gi
+          securityContext:
+            allowPrivilegeEscalation: false
+            runAsGroup: 0
+            seccompProfile:
+              type: RuntimeDefault
+          volumeMounts:
+            - name: model-storage
+              mountPath: /mnt/models
+            - name: shm-volume
+              mountPath: /dev/shm
+            - name: cache-volume
+              mountPath: /.cache
+            - name: config-volume
+              mountPath: /.config
+            - name: tmp-volume
+              mountPath: /tmp
+            - name: home-volume
+              mountPath: /root
+          lifecycle:
+            preStop:
+              exec:
+                command:
+                  - /bin/sh
+                  - -c
+                  - sleep 10
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: 11437
+            initialDelaySeconds: 180
+            periodSeconds: 60
+            timeoutSeconds: 10
+            failureThreshold: 3
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: 11437
+            initialDelaySeconds: 180
+            periodSeconds: 30
+            timeoutSeconds: 10
+            failureThreshold: 3
